@@ -1,0 +1,246 @@
+﻿@page "/"
+@using System.Text.RegularExpressions
+@using System.Web
+@using ChatBot.Services
+@using LLama.Native
+@using LLamaSharp.SemanticKernel.ChatCompletion
+@using Microsoft.SemanticKernel
+@using Microsoft.SemanticKernel.Connectors.OpenAI
+@using System.Text.Json
+@using System.Net.Http.Headers
+@using LLama
+@using LLama.Common
+@using ChatHistory = Microsoft.SemanticKernel.ChatCompletion.ChatHistory
+
+@inject KernelMemoryService AIService
+@inject IJSRuntime _jsRuntime
+@inject KernelMemoryService KernelMemory
+@rendermode InteractiveServer
+
+
+<section class="avenue-messenger">
+    <div class="agent-face">
+        <div class="half">
+            <img class="agent circle" src="bot-icon.jpg" alt="Bot">
+        </div>
+    </div>
+    <div class="chat">
+        <div class="chat-title">
+            <h1>ChatBot</h1>
+        </div>
+        <div class="messages">
+            <div id="messageContainer" class="messages-content">
+                @foreach (var q in conversation)
+                {
+                    @if (q.role.Equals(AuthorRole.Assistant))
+                    {
+                        <div class="message new">
+                            <figure class="avatar"><img src="bot-icon.jpg" /></figure>
+                            @((MarkupString)q.message)
+                            @if (q.time != null)
+                            {
+                                <div class="timestamp">@q.time</div>
+                            }
+                        </div>
+                    }
+                    @if (q.role.Equals(AuthorRole.User))
+                    {
+                        <div class="message message-personal new">
+                            @q.message
+                            @if (q.time != null)
+                            {
+                                <div class="timestamp">@q.time</div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>               
+        <div class="message-box">
+            <input type="text" class="message-input" placeholder="Upišite poruku..." @bind="question" @onkeyup="AskOnEnter"></input>
+            <button type="submit" class="message-submit" @onclick="Ask" disabled="@_isBusy">Pošalji</button>
+        </div>
+    </div>
+</section>
+
+@code {
+    private string question;
+    //private KernelResponseDto answer;
+    ChatHistory _chatHistory;
+    OpenAIPromptExecutionSettings settings;
+    Kernel _kernel;
+    InferenceParams inferenceParams;
+
+    //StatelessExecutor executor;
+
+
+    List<Message> conversation = new();
+
+    public class ChatSession : IDisposable
+    {
+
+        public ModelParams ModelParameters = null!;
+        public LLamaWeights Model = null!;
+        public LLamaContext Context = null;
+        public StatelessExecutor Executor = null!;
+        public LLamaSharpChatCompletion ChatGpt = null!;
+        public ChatHistory ChatHistory = null!;
+
+        public void Dispose()
+        {
+            Model.Dispose();
+        }
+    }
+
+    public ChatSession _chatSession = new ChatSession();
+
+    protected override void OnInitialized()
+    {
+        if (_chatSession.Model == null)
+        {
+            var modelPath = @"D:\Faks\DiplomskiRadV2\ChatBot\ChatBot\LLModels\Meta-Llama-3-8B-Instruct-Q4_K_M.gguf";
+            var systemPrompt = $@"
+                Facts: {{$facts}}
+                Given ONLY the facts above, provide a answer.
+                Give answers only in Croatian. Answer must be concise, complete and clear.
+                You don't know where the knowledge comes from, just answer.
+                If you don't have sufficient information, reply with '{{$notFound}}'.
+                Question: {{$input}}
+                Answer:
+            ";
+
+
+            settings = new()
+                {
+                    Temperature = 0.1,
+                    FrequencyPenalty = 0.0,
+                    PresencePenalty = 0.0,
+                    TopP = 1.0
+                };
+            if (_chatSession.Model != null)
+            {
+                _chatSession.Model.Dispose();
+            }
+            _chatSession.ModelParameters = new ModelParams(modelPath)
+                {
+                    ContextSize = 4096,
+                    GpuLayerCount = 3200
+                };
+
+            _chatSession.Model = LLamaWeights.LoadFromFile(_chatSession.ModelParameters);
+            _chatSession.Context = new LLamaContext(_chatSession.Model, _chatSession.ModelParameters);
+            _chatSession.Executor = new StatelessExecutor(_chatSession.Model, _chatSession.ModelParameters);
+            _chatSession.ChatGpt = new LLamaSharpChatCompletion(_chatSession.Executor);
+            _chatSession.ChatHistory = _chatSession.ChatGpt.CreateNewChat(systemPrompt);
+            conversation.Add(new(AuthorRole.Assistant, "Poštovanje, ja sam ChatBot za brodarsku tvrtku, pomoći ću vam sa svim pitanjima u vezi s njom. Kako vam mogu pomoći danas?", DateTime.Now.ToString("HH:mm")));
+        }
+        base.OnInitialized();
+    }
+
+
+
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await _jsRuntime.InvokeAsync<string>("ScrollToBottom", null);
+    }
+
+    private bool _isBusy;
+    public bool micOn = false;
+    private DotNetObjectReference<AskQuestion>? objRef;
+
+
+    private async Task Ask()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(question)) return;
+
+            _isBusy = true;
+            StateHasChanged();
+
+            var askedQuestion = question;
+            question = null;
+            var content = "...";
+            conversation.Add(new(AuthorRole.User, askedQuestion, DateTime.Now.ToString("HH:mm")));
+
+            StateHasChanged();
+            var memoryAnswer = await KernelMemory._kernelMemory.AskAsync(askedQuestion);
+
+            conversation.Add(new(AuthorRole.Assistant, content, null));
+
+            var prompt = $@"
+               Question to Kernel Memory: {askedQuestion}
+
+               Kernel Memory Answer: {memoryAnswer.Result}
+
+               If the answer is empty say 'Ne mogu pronaći traženi dokument.', otherwise reply with the answer.
+            ";
+
+            _chatSession.ChatHistory.AddUserMessage(prompt);
+
+            var stream = _chatSession.ChatGpt.GetStreamingChatMessageContentsAsync(_chatSession.ChatHistory, settings);
+
+            content = "";
+            await foreach (var contentPiece in stream)
+            {
+                if (string.IsNullOrEmpty(contentPiece.Content)) continue;
+                if (contentPiece.Content.Equals("<|eot_id|>")) 
+                    break;
+                content += contentPiece.Content;
+                conversation[conversation.Count - 1].message = content;
+                StateHasChanged();
+            }
+            
+            conversation[conversation.Count - 1].time = DateTime.Now.ToString("HH:mm");
+            _chatSession.ChatHistory.AddAssistantMessage(content);
+    
+        }
+        catch (Exception e)
+        {
+            conversation[conversation.Count - 1].message = "Došlo je do pogreške prilikom komunikacije. Molim Vas ponovite zadnji upit.";
+            conversation[conversation.Count - 1].time = DateTime.Now.ToString("HH:mm");
+
+            await _jsRuntime.InvokeVoidAsync("logError", e.Message);
+
+        }
+        finally
+        {
+            _isBusy = false;
+            StateHasChanged();
+        }
+
+    }
+
+    private void AskOnEnter(KeyboardEventArgs eventArgs)
+    {
+        if ((eventArgs.Key == "Enter" || eventArgs.Code == "NumpadEnter") && !_isBusy)
+        {
+            Ask();
+        }
+    }
+
+
+    private class Message
+    {
+        public AuthorRole role { get; set; }
+        public string? message { get; set; }
+        public string? time { get; set; }
+
+        public Message(AuthorRole _role, string _message, string? _time)
+        {
+            role = _role;
+            message = _message;
+            time = _time;
+        }
+    }
+}
+
+
+<script>
+    window.ScrollToBottom = () => {
+        var objDiv = document.getElementById("messageContainer");
+        objDiv.scrollTop = objDiv.scrollHeight;
+    }
+</script>

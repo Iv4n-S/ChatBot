@@ -485,10 +485,11 @@ body {
     -webkit-border-radius: 20px;
     -moz-border-radius: 20px;
     border-radius: 20px;
-    height: calc(100% - 60px) !important;
+    height: calc(100% - 90px) !important;
     max-height: 720px !important;
     min-height: 220px !important;
     width: 500px;
+    margin-bottom: 100px;
     /* transform: translateY(0);
 	 -webkit-transform: translateY(0);
 	 -moz-transform: translateY(0);

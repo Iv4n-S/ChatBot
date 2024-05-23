@@ -17,7 +17,6 @@
 @inject KernelMemoryService KernelMemory
 @rendermode InteractiveServer
 
-
 <section class="avenue-messenger">
     <div class="agent-face">
         <div class="half">
@@ -62,19 +61,43 @@
         </div>
     </div>
 </section>
+<div style="height: 100px;">
+    @if (sources.Count != 0)
+    {
+        <div style="display: flex; justify-content: center;">
+            <div class="p-2" style="border: 2px solid #ccc;border-radius:5px;overflow-y:scroll;height:400px; width: 90%;">
+                <table>
+                    <tr class="text-center">
+                        <th class="p-2">Id datoteke</th>
+                        <th class="p-2">Broj particije</th>
+                        <th class="p-2">Sadržaj</th>
+                        <th class="p-2">Relevantnost</th>
+                    </tr>
+                    @foreach (var source in sources)
+                    {
+                        <tr>
+                            <td class="p-2">@source.FileId</td>
+                        <td class="p-2 text-center">@source.PartitionNumber</td>
+                        <td class="p-2">@source.Text</td>
+                        <td class="p-2 text-center">@source.Relevance</td>
+                    </tr>
+                }
+
+            </table>
+        </div>
+    </div>
+    }
+</div>
 
 @code {
     private string question;
-    //private KernelResponseDto answer;
     ChatHistory _chatHistory;
     OpenAIPromptExecutionSettings settings;
     Kernel _kernel;
     InferenceParams inferenceParams;
 
-    //StatelessExecutor executor;
-
-
     List<Message> conversation = new();
+    List<Sources> sources = new();
 
     public class ChatSession : IDisposable
     {
@@ -157,6 +180,7 @@
         {
             if (string.IsNullOrEmpty(question)) return;
 
+            sources = new ();
             _isBusy = true;
             StateHasChanged();
 
@@ -164,18 +188,16 @@
             question = null;
             var content = "...";
             conversation.Add(new(AuthorRole.User, askedQuestion, DateTime.Now.ToString("HH:mm")));
-
+            conversation.Add(new(AuthorRole.Assistant, content, null));
             StateHasChanged();
             var memoryAnswer = await KernelMemory._kernelMemory.AskAsync(askedQuestion);
-
-            conversation.Add(new(AuthorRole.Assistant, content, null));
 
             var prompt = $@"
                Question to Kernel Memory: {askedQuestion}
 
                Kernel Memory Answer: {memoryAnswer.Result}
 
-               If the answer is empty say 'Ne mogu pronaći traženi dokument.', otherwise reply with the answer.
+               If the answer is empty say 'Ne znam odgovoriti na ovo pitanje.', otherwise reply with the answer.
             ";
 
             _chatSession.ChatHistory.AddUserMessage(prompt);
@@ -192,10 +214,17 @@
                 conversation[conversation.Count - 1].message = content;
                 StateHasChanged();
             }
-            
+
             conversation[conversation.Count - 1].time = DateTime.Now.ToString("HH:mm");
             _chatSession.ChatHistory.AddAssistantMessage(content);
-    
+
+            foreach(var source in memoryAnswer.RelevantSources)
+            {
+                foreach(var partition in source.Partitions)
+                {
+                    sources.Add(new Sources { FileId = source.FileId, PartitionNumber = partition.PartitionNumber, Text = partition.Text.Trim(), Relevance = partition.Relevance });
+                }
+            }
         }
         catch (Exception e)
         {
@@ -221,7 +250,6 @@
         }
     }
 
-
     private class Message
     {
         public AuthorRole role { get; set; }
@@ -235,6 +263,14 @@
             time = _time;
         }
     }
+
+    private class Sources
+    {
+        public string FileId { get; set; }
+        public int PartitionNumber { get; set; }
+        public string Text { get; set; }
+        public float Relevance { get; set; }
+    }
 }
 
 
@@ -242,5 +278,9 @@
     window.ScrollToBottom = () => {
         var objDiv = document.getElementById("messageContainer");
         objDiv.scrollTop = objDiv.scrollHeight;
+    }
+
+    window.ScrollToSources = () => {
+        window.scrollTo(0, document.body.scrollHeight);
     }
 </script>

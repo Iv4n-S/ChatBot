@@ -489,7 +489,8 @@ body {
     max-height: 720px !important;
     min-height: 220px !important;
     width: 500px;
-    margin-bottom: 100px;
+    margin-bottom: 50px;
+    margin-top: 50px;
     /* transform: translateY(0);
 	 -webkit-transform: translateY(0);
 	 -moz-transform: translateY(0);
@@ -498,7 +499,7 @@ body {
     position: relative;
     right: 20px;
     bottom: 20px;
-    margin: auto;
+    margin-inline: auto;
     z-index: 10;
     box-shadow: 2px 10px 40px rgba(22, 20, 19, 0.4);
     /* transform: translateX(300px);

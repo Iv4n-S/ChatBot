@@ -1,8 +1,8 @@
 ﻿using Microsoft.KernelMemory;
-using Microsoft.KernelMemory.SemanticKernel;
 using LLamaSharp.KernelMemory;
-using Microsoft.KernelMemory.AI;
 using Microsoft.KernelMemory.Configuration;
+using ChatBot.Models;
+using System.Text.Json;
 
 namespace ChatBot.Services
 {
@@ -65,6 +65,34 @@ namespace ChatBot.Services
             catch
             {
                 return false;
+            }
+        }
+
+        public async Task<string> AskQuestion(string question)
+        {
+            try
+            {
+                var answer = await _kernelMemory.SearchAsync(question, minRelevance: 0.75, limit: 2);
+
+                List<MemoryResponseDto> response = new();
+                if (answer?.Results == null)
+                {
+                    return "";
+                }
+                foreach (var answerItem in answer.Results) {
+                    if (answerItem == null)
+                        continue;
+                    foreach (var partition in answerItem.Partitions)
+                    {
+                        response.Add(new MemoryResponseDto(partition.Text.Trim(), partition.Relevance));
+                        SourcesList.AddSource(new SourceDto { FileId = answerItem.FileId, PartitionNumber = partition.PartitionNumber, Text = partition.Text.Trim(), Relevance = partition.Relevance });
+                    }
+                }
+                return JsonSerializer.Serialize(response);
+            }
+            catch 
+            {
+                return "";
             }
         }
     }

@@ -1,20 +1,20 @@
 ﻿@page "/"
 @using System.Text.RegularExpressions
 @using System.Web
+@using ChatBot.Models
 @using ChatBot.Services
 @using LLama.Native
 @using LLamaSharp.SemanticKernel.ChatCompletion
 @using Microsoft.SemanticKernel
+@using Microsoft.SemanticKernel.ChatCompletion
 @using Microsoft.SemanticKernel.Connectors.OpenAI
 @using System.Text.Json
 @using System.Net.Http.Headers
-@using LLama
-@using LLama.Common
 @using ChatHistory = Microsoft.SemanticKernel.ChatCompletion.ChatHistory
 
-@inject KernelMemoryService AIService
-@inject IJSRuntime _jsRuntime
 @inject KernelMemoryService KernelMemory
+@inject IJSRuntime _jsRuntime
+@inject SemanticKernelService SemanticKernel
 @rendermode InteractiveServer
 
 <section class="avenue-messenger">
@@ -65,7 +65,7 @@
     @if (sources.Count != 0)
     {
         <div style="display: flex; justify-content: center;">
-            <div class="p-2" style="border: 2px solid #ccc;border-radius:5px;overflow-y:scroll;height:400px; width: 90%;">
+            <div class="p-2" style="border: 2px solid #ccc;border-radius:5px;overflow-y:scroll;height:500px; width: 90%;">
                 <table>
                     <tr class="text-center">
                         <th class="p-2">Id datoteke</th>
@@ -94,70 +94,41 @@
     ChatHistory _chatHistory;
     OpenAIPromptExecutionSettings settings;
     Kernel _kernel;
-    InferenceParams inferenceParams;
+    IChatCompletionService _completionService;
+
 
     List<Message> conversation = new();
-    List<Sources> sources = new();
-
-    public class ChatSession : IDisposable
-    {
-
-        public ModelParams ModelParameters = null!;
-        public LLamaWeights Model = null!;
-        public LLamaContext Context = null;
-        public StatelessExecutor Executor = null!;
-        public LLamaSharpChatCompletion ChatGpt = null!;
-        public ChatHistory ChatHistory = null!;
-
-        public void Dispose()
-        {
-            Model.Dispose();
-        }
-    }
-
-    public ChatSession _chatSession = new ChatSession();
+    List<SourceDto> sources = new();
 
     protected override void OnInitialized()
     {
-        if (_chatSession.Model == null)
-        {
-            var modelPath = @"D:\Faks\DiplomskiRadV2\ChatBot\ChatBot\LLModels\Meta-Llama-3-8B-Instruct-Q4_K_M.gguf";
-            var systemPrompt = $@"
+        base.OnInitialized();
+        _chatHistory = new ChatHistory();
+        _completionService = SemanticKernel._kernel.GetRequiredService<IChatCompletionService>();
+
+        var systemPrompt = $@"
                 Facts: {{$facts}}
-                Given ONLY the facts above, provide a answer.
-                Give answers only in Croatian. Answer must be concise, complete and clear.
+
+                Given ONLY the facts above, provide a short answer without explanations and notes.
+                Give answers ONLY in Croatian language.
+                Use as little words as possible in response
                 You don't know where the knowledge comes from, just answer.
+
                 If you don't have sufficient information, reply with '{{$notFound}}'.
                 Question: {{$input}}
                 Answer:
-            ";
+            "; 
 
+        settings = new()
+        {
+            ChatSystemPrompt = systemPrompt,
+            Temperature = 0.1,
+            FrequencyPenalty = 0.0,
+            PresencePenalty = 0.0,
+            TopP = 1.0
+        }; 
 
-            settings = new()
-                {
-                    Temperature = 0.1,
-                    FrequencyPenalty = 0.0,
-                    PresencePenalty = 0.0,
-                    TopP = 1.0
-                };
-            if (_chatSession.Model != null)
-            {
-                _chatSession.Model.Dispose();
-            }
-            _chatSession.ModelParameters = new ModelParams(modelPath)
-                {
-                    ContextSize = 4096,
-                    GpuLayerCount = 3200
-                };
-
-            _chatSession.Model = LLamaWeights.LoadFromFile(_chatSession.ModelParameters);
-            _chatSession.Context = new LLamaContext(_chatSession.Model, _chatSession.ModelParameters);
-            _chatSession.Executor = new StatelessExecutor(_chatSession.Model, _chatSession.ModelParameters);
-            _chatSession.ChatGpt = new LLamaSharpChatCompletion(_chatSession.Executor);
-            _chatSession.ChatHistory = _chatSession.ChatGpt.CreateNewChat(systemPrompt);
-            conversation.Add(new(AuthorRole.Assistant, "Poštovanje, ja sam ChatBot za brodarsku tvrtku, pomoći ću vam sa svim pitanjima u vezi s njom. Kako vam mogu pomoći danas?", DateTime.Now.ToString("HH:mm")));
-        }
-        base.OnInitialized();
+        conversation.Add(new(AuthorRole.Assistant, "Poštovanje, ja sam ChatBot za brodarsku tvrtku, pomoći ću vam sa svim pitanjima u vezi s njom. Kako vam mogu pomoći danas?", DateTime.Now.ToString("HH:mm")));
     }
 
 
@@ -184,25 +155,34 @@
             _isBusy = true;
             StateHasChanged();
 
+
+            conversation.Add(new(AuthorRole.User, question, DateTime.Now.ToString("HH:mm")));
             var askedQuestion = question;
             question = null;
-            var content = "...";
-            conversation.Add(new(AuthorRole.User, askedQuestion, DateTime.Now.ToString("HH:mm")));
-            conversation.Add(new(AuthorRole.Assistant, content, null));
             StateHasChanged();
-            var memoryAnswer = await KernelMemory._kernelMemory.AskAsync(askedQuestion);
+
+            SourcesList.ResetSources();
+
+            var memoryAnswer = await KernelMemory.AskQuestion(askedQuestion);
 
             var prompt = $@"
-               Question to Kernel Memory: {askedQuestion}
+                   Question: {askedQuestion}
 
-               Kernel Memory Answer: {memoryAnswer.Result}
+                   Facts:
+                    ====
+                    {memoryAnswer}
+                    ====
 
-               If the answer is empty say 'Ne znam odgovoriti na ovo pitanje.', otherwise reply with the answer.
-            ";
+                   If Facts are empty say 'Ne znam odgovoriti na ovo pitanje.', otherwise generate your answer from Facts.
+                ";
 
-            _chatSession.ChatHistory.AddUserMessage(prompt);
+            _chatHistory.AddUserMessage(prompt);
 
-            var stream = _chatSession.ChatGpt.GetStreamingChatMessageContentsAsync(_chatSession.ChatHistory, settings);
+            var content = "...";
+            conversation.Add(new(AuthorRole.Assistant, content, null));
+            StateHasChanged();
+
+            var stream = _completionService.GetStreamingChatMessageContentsAsync(_chatHistory, settings, SemanticKernel._kernel);
 
             content = "";
             await foreach (var contentPiece in stream)
@@ -216,23 +196,16 @@
             }
 
             conversation[conversation.Count - 1].time = DateTime.Now.ToString("HH:mm");
-            _chatSession.ChatHistory.AddAssistantMessage(content);
-
-            foreach(var source in memoryAnswer.RelevantSources)
+            _chatHistory.AddAssistantMessage(content);
+            if (SourcesList.Sources.Count > 0)
             {
-                foreach(var partition in source.Partitions)
-                {
-                    sources.Add(new Sources { FileId = source.FileId, PartitionNumber = partition.PartitionNumber, Text = partition.Text.Trim(), Relevance = partition.Relevance });
-                }
+                sources.AddRange(SourcesList.GetSources());
             }
         }
         catch (Exception e)
         {
             conversation[conversation.Count - 1].message = "Došlo je do pogreške prilikom komunikacije. Molim Vas ponovite zadnji upit.";
             conversation[conversation.Count - 1].time = DateTime.Now.ToString("HH:mm");
-
-            await _jsRuntime.InvokeVoidAsync("logError", e.Message);
-
         }
         finally
         {

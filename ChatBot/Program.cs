@@ -8,6 +8,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddSingleton<KernelMemoryService>();
+builder.Services.AddSingleton<SemanticKernelService>();
 
 var app = builder.Build();
 

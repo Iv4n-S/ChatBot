@@ -111,13 +111,12 @@
 
                 Given ONLY the facts above, provide a short answer without explanations and notes.
                 Give answers ONLY in Croatian language.
-                Use as little words as possible in response
                 You don't know where the knowledge comes from, just answer.
 
                 If you don't have sufficient information, reply with '{{$notFound}}'.
                 Question: {{$input}}
                 Answer:
-            "; 
+            ";
 
         settings = new()
         {
@@ -164,7 +163,6 @@
             SourcesList.ResetSources();
 
             var memoryAnswer = await KernelMemory.AskQuestion(askedQuestion);
-
             var prompt = $@"
                    Question: {askedQuestion}
 
@@ -173,9 +171,18 @@
                     {memoryAnswer}
                     ====
 
-                   If Facts are empty say 'Ne znam odgovoriti na ovo pitanje.', otherwise generate your answer from Facts.
+                   If Facts are empty say 'Ne znam odgovoriti na ovo pitanje.', otherwise generate your answer from Facts in Croatian language ONLY.
+                   Use as little words as possible in response.
+                   
                 ";
+            if (JsonSerializer.Deserialize<List<MemoryResponseDto>>(memoryAnswer).Count() == 0)
+            {
+                prompt = $@"
+                   Question: {askedQuestion}
 
+                   Try answering from context in Croatian language, if you can't then say 'Ne znam odgovoriti na ovo pitanje.'.
+                ";
+            }
             _chatHistory.AddUserMessage(prompt);
 
             var content = "...";

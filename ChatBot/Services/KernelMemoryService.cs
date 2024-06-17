@@ -3,6 +3,7 @@ using LLamaSharp.KernelMemory;
 using Microsoft.KernelMemory.Configuration;
 using ChatBot.Models;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 
 namespace ChatBot.Services
 {
@@ -18,8 +19,8 @@ namespace ChatBot.Services
                 .WithCustomTextPartitioningOptions(
                     new TextPartitioningOptions
                     {
-                        MaxTokensPerParagraph = 256,
-                        MaxTokensPerLine = 256,
+                        MaxTokensPerParagraph = 512,
+                        MaxTokensPerLine = 512,
                         OverlappingTokens = 50
                     })
                 .WithSimpleVectorDb(new Microsoft.KernelMemory.MemoryStorage.DevTools.SimpleVectorDbConfig()
@@ -88,7 +89,7 @@ namespace ChatBot.Services
                         SourcesList.AddSource(new SourceDto { FileId = answerItem.FileId, PartitionNumber = partition.PartitionNumber, Text = partition.Text.Trim(), Relevance = partition.Relevance });
                     }
                 }
-                return JsonSerializer.Serialize(response);
+                return JsonSerializer.Serialize(response, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
             }
             catch 
             {

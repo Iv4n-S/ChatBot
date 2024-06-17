@@ -117,7 +117,7 @@
                 Question: {{$input}}
                 Answer:
             ";
-
+        
         settings = new()
         {
             ChatSystemPrompt = systemPrompt,
@@ -140,7 +140,6 @@
     }
 
     private bool _isBusy;
-    public bool micOn = false;
     private DotNetObjectReference<AskQuestion>? objRef;
 
 
@@ -164,25 +163,26 @@
 
             var memoryAnswer = await KernelMemory.AskQuestion(askedQuestion);
             var prompt = $@"
-                   Question: {askedQuestion}
+                Question: {askedQuestion}
 
-                   Facts:
-                    ====
-                    {memoryAnswer}
-                    ====
+                Facts:
+                ====
+                {memoryAnswer}
+                ====
 
-                   If Facts are empty say 'Ne znam odgovoriti na ovo pitanje.', otherwise generate your answer from Facts in Croatian language ONLY.
-                   Use as little words as possible in response.
-                   
-                ";
+                If Facts are empty say 'Ne znam odgovoriti na ovo pitanje.', otherwise generate your answer from Facts.
+                Use as little words as possible in response.
+            ";
+
             if (JsonSerializer.Deserialize<List<MemoryResponseDto>>(memoryAnswer).Count() == 0)
-            {
+            { 
                 prompt = $@"
                    Question: {askedQuestion}
 
-                   Try answering from context in Croatian language, if you can't then say 'Ne znam odgovoriti na ovo pitanje.'.
+                   Try answering from context, if you can't then say 'Ne znam odgovoriti na ovo pitanje.'.
                 ";
             }
+
             _chatHistory.AddUserMessage(prompt);
 
             var content = "...";
@@ -195,8 +195,7 @@
             await foreach (var contentPiece in stream)
             {
                 if (string.IsNullOrEmpty(contentPiece.Content)) continue;
-                if (contentPiece.Content.Equals("<|eot_id|>")) 
-                    break;
+                if (contentPiece.Content.Equals("<|eot_id|>")) break;
                 content += contentPiece.Content;
                 conversation[conversation.Count - 1].message = content;
                 StateHasChanged();
